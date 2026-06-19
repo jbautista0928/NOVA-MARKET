@@ -1,23 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 
 const COOKIE_NAME = "novamarket_admin_session";
 
-function expectedToken() {
-  // Token derivado de la contraseña de admin + un secreto fijo del servidor.
-  // Así nunca se guarda la contraseña en texto plano en la cookie.
+// Web Crypto API: funciona tanto en Node.js (API routes) como en
+// Edge Runtime (middleware), así el cálculo del token es idéntico
+// en ambos lugares.
+async function expectedToken(): Promise<string> {
   const secret = process.env.ADMIN_SESSION_SECRET || "fallback-secret-change-me";
-  return crypto
-    .createHash("sha256")
-    .update(secret + process.env.ADMIN_PASSWORD)
-    .digest("hex");
+  const input = secret + process.env.ADMIN_PASSWORD;
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function checkPassword(password: string): boolean {
   return password === process.env.ADMIN_PASSWORD;
 }
 
-export function createSessionToken(): string {
+export async function createSessionToken(): Promise<string> {
   return expectedToken();
 }
 
@@ -30,8 +33,9 @@ export async function requireAdminSession(
   req: NextRequest
 ): Promise<NextResponse | null> {
   const token = req.cookies.get(COOKIE_NAME)?.value;
+  const expected = await expectedToken();
 
-  if (!token || token !== expectedToken()) {
+  if (!token || token !== expected) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
   return null;
