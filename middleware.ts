@@ -1,24 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 
 const COOKIE_NAME = "novamarket_admin_session";
 
-function expectedToken() {
+// Web Crypto API (compatible con Edge Runtime, a diferencia del
+// módulo "crypto" de Node.js que no funciona en middleware).
+async function expectedToken(): Promise<string> {
   const secret = process.env.ADMIN_SESSION_SECRET || "fallback-secret-change-me";
-  return crypto
-    .createHash("sha256")
-    .update(secret + process.env.ADMIN_PASSWORD)
-    .digest("hex");
+  const input = secret + process.env.ADMIN_PASSWORD;
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   const isAdminRoute = pathname.startsWith("/admin") && pathname !== "/admin/login";
   if (!isAdminRoute) return NextResponse.next();
 
   const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (!token || token !== expectedToken()) {
+  const expected = await expectedToken();
+
+  if (!token || token !== expected) {
     const loginUrl = new URL("/admin/login", req.url);
     return NextResponse.redirect(loginUrl);
   }
